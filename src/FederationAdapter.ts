@@ -56,12 +56,12 @@ function updateFromPeers(
 ): Promise<void> {
   const entries = Object.entries(allPeers)
   return entries.length
-    ? Promise.resolve()
-    : Promise.all(
+    ? Promise.all(
         entries.map(([name, peer]) =>
           updateFromPeer(internal, persist, name, peer, soul, maxStaleness)
         )
       ).then(NOOP)
+    : Promise.resolve()
 }
 
 export function createFederatedAdapter(
