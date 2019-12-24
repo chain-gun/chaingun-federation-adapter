@@ -1,1 +1,1 @@
-export * from './lib/number';
+export { FederationAdapter } from "./FederationAdapter"

@@ -1,11 +1,11 @@
 {
   "name": "@chaingun/federation-adapter",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "ChainGun Adapter for sourcing from federated peers",
   "main": "build/main/index.js",
   "typings": "build/main/index.d.ts",
   "module": "build/module/index.js",
-  "repository": "https://github.com/go1dfish/@chaingun/federation-adapter",
+  "repository": "https://github.com/chain-gun/chaingun-federation-adapter",
   "license": "MIT",
   "keywords": [],
   "scripts": {
@@ -50,7 +50,9 @@
   "engines": {
     "node": ">=8.9"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@chaingun/types": "^0.0.4"
+  },
   "devDependencies": {
     "@bitjson/npm-scripts-info": "^1.0.0",
     "@bitjson/typedoc": "^0.15.0-0",
@@ -85,7 +87,8 @@
     }
   },
   "prettier": {
-    "singleQuote": true
+    "singleQuote": true,
+    "semi": false
   },
   "nyc": {
     "extends": "@istanbuljs/nyc-config-typescript",
