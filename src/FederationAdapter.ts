@@ -79,7 +79,7 @@ function updatePeers(data: GunGraphData, allPeers: PeerSet): Promise<void> {
     : Promise.resolve()
 }
 
-interface FederatedAdapterOpts {
+export interface FederatedAdapterOpts {
   readonly maxStaleness?: number
   readonly putToPeers?: boolean
 }

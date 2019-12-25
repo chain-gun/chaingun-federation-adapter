@@ -1,1 +1,1 @@
-export { FederationAdapter } from "./FederationAdapter"
+export { FederationAdapter, FederatedAdapterOpts } from './FederationAdapter'
