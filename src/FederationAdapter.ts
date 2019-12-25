@@ -1,4 +1,4 @@
-import { GunGetOpts, GunGraphAdapter } from '@chaingun/types'
+import { GunGetOpts, GunGraphAdapter, GunGraphData } from '@chaingun/types'
 
 type PeerSet = Record<string, GunGraphAdapter>
 
@@ -64,12 +64,33 @@ function updateFromPeers(
     : Promise.resolve()
 }
 
+function updatePeers(data: GunGraphData, allPeers: PeerSet): Promise<void> {
+  const entries = Object.entries(allPeers)
+  return entries.length
+    ? Promise.all(
+        entries.map(([name, peer]) =>
+          peer.put(data).catch(err => {
+            // @ts-ignore
+            // tslint:disable-next-line: no-console
+            console.warn('Failed to update peer', name, err.stack || err, data)
+          })
+        )
+      ).then(NOOP)
+    : Promise.resolve()
+}
+
+interface FederatedAdapterOpts {
+  readonly maxStaleness?: number
+  readonly putToPeers?: boolean
+}
+
 export function createFederatedAdapter(
   internal: GunGraphAdapter,
   external: PeerSet,
-  persistence: GunGraphAdapter,
-  maxStaleness = MAX_STALENESS
+  persistence?: GunGraphAdapter,
+  adapterOpts: FederatedAdapterOpts = {}
 ): GunGraphAdapter {
+  const { maxStaleness = MAX_STALENESS, putToPeers = false } = adapterOpts
   const persist = persistence || internal
   const peers = { ...external }
 
@@ -86,7 +107,15 @@ export function createFederatedAdapter(
         }
       : undefined,
 
-    put: persist.put
+    put: async (data: GunGraphData) => {
+      const diff = await persist.put(data)
+
+      if (diff && putToPeers) {
+        updatePeers(diff, peers)
+      }
+
+      return diff
+    }
   }
 }
 
