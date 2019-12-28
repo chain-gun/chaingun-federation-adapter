@@ -1,10 +1,44 @@
 import { GunGetOpts, GunGraphAdapter, GunGraphData } from '@chaingun/types'
+import uuid from 'uuid'
 
 type PeerSet = Record<string, GunGraphAdapter>
 
-const MAX_STALENESS = 1000 * 60 * 60 * 24
+export interface FederatedAdapterOpts {
+  readonly maxStaleness?: number
+  readonly putToPeers?: boolean
+  readonly maintainChangelog?: boolean
+}
+
+const CHANGELOG_SOUL = 'changelog'
+
+const DEFAULTS = {
+  maintainChangelog: true,
+  maxStaleness: 1000 * 60 * 60 * 24,
+  putToPeers: false
+}
+
 const NOOP = () => {
   // intentionally left blank
+}
+
+async function updateChangelog(
+  internal: GunGraphAdapter,
+  diff: GunGraphData
+): Promise<void> {
+  const now = new Date()
+  const itemKey = `${now.toISOString()}-${uuid.v4()}`
+
+  await internal.put({
+    [CHANGELOG_SOUL]: {
+      _: {
+        '#': CHANGELOG_SOUL,
+        '>': {
+          [itemKey]: now.getTime()
+        }
+      },
+      [itemKey]: diff
+    }
+  })
 }
 
 async function updateFromPeer(
@@ -13,8 +47,12 @@ async function updateFromPeer(
   name: string,
   peer: GunGraphAdapter,
   soul: string,
-  maxStaleness = MAX_STALENESS
+  opts?: FederatedAdapterOpts
 ): Promise<void> {
+  const {
+    maxStaleness = DEFAULTS.maxStaleness,
+    maintainChangelog = DEFAULTS.maintainChangelog
+  } = opts || DEFAULTS
   const peerSoul = `peers/${name}`
   const now = new Date().getTime()
   const status = await internal.get(peerSoul, {
@@ -29,15 +67,19 @@ async function updateFromPeer(
   const node = await peer.get(soul)
 
   if (node) {
-    await persist.put({
+    const diff = await persist.put({
       [soul]: node
     })
+
+    if (diff && maintainChangelog) {
+      updateChangelog(internal, diff)
+    }
   }
 
   await internal.put({
     [peerSoul]: {
       _: {
-        '#': soul,
+        '#': peerSoul,
         '>': {
           [soul]: now
         }
@@ -52,13 +94,13 @@ function updateFromPeers(
   persist: GunGraphAdapter,
   allPeers: PeerSet,
   soul: string,
-  maxStaleness = MAX_STALENESS
+  opts?: FederatedAdapterOpts
 ): Promise<void> {
   const entries = Object.entries(allPeers)
   return entries.length
     ? Promise.all(
         entries.map(([name, peer]) =>
-          updateFromPeer(internal, persist, name, peer, soul, maxStaleness)
+          updateFromPeer(internal, persist, name, peer, soul, opts)
         )
       ).then(NOOP)
     : Promise.resolve()
@@ -79,36 +121,42 @@ function updatePeers(data: GunGraphData, allPeers: PeerSet): Promise<void> {
     : Promise.resolve()
 }
 
-export interface FederatedAdapterOpts {
-  readonly maxStaleness?: number
-  readonly putToPeers?: boolean
-}
-
 export function createFederatedAdapter(
   internal: GunGraphAdapter,
   external: PeerSet,
   persistence?: GunGraphAdapter,
-  adapterOpts: FederatedAdapterOpts = {}
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
 ): GunGraphAdapter {
-  const { maxStaleness = MAX_STALENESS, putToPeers = false } = adapterOpts
+  const {
+    putToPeers = DEFAULTS.putToPeers,
+    maintainChangelog = DEFAULTS.maintainChangelog
+  } = adapterOpts
   const persist = persistence || internal
   const peers = { ...external }
 
   return {
     get: async (soul: string, opts?: GunGetOpts) => {
-      await updateFromPeers(internal, persist, peers, soul, maxStaleness)
+      await updateFromPeers(internal, persist, peers, soul, adapterOpts)
       return internal.get(soul, opts)
     },
 
     getJsonString: internal.getJsonString
       ? async (soul: string, opts?: GunGetOpts) => {
-          await updateFromPeers(internal, persist, peers, soul, maxStaleness)
+          await updateFromPeers(internal, persist, peers, soul, adapterOpts)
           return internal.getJsonString!(soul, opts)
         }
       : undefined,
 
     put: async (data: GunGraphData) => {
       const diff = await persist.put(data)
+
+      if (!diff) {
+        return diff
+      }
+
+      if (maintainChangelog) {
+        updateChangelog(internal, diff)
+      }
 
       if (diff && putToPeers) {
         updatePeers(diff, peers)
