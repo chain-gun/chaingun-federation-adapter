@@ -9,15 +9,17 @@ import uuid from 'uuid'
 type PeerSet = Record<string, GunGraphAdapter>
 
 export interface FederatedAdapterOpts {
+  readonly backSync?: number
   readonly maxStaleness?: number
-  readonly putToPeers?: boolean
   readonly maintainChangelog?: boolean
+  readonly putToPeers?: boolean
 }
 
 const CHANGELOG_SOUL = 'changelog'
 const PEER_SYNC_SOUL = `peersync`
 
 const DEFAULTS = {
+  backSync: 1000 * 60 * 60 * 1, // 1 Hour
   maintainChangelog: true,
   maxStaleness: 1000 * 60 * 60 * 24,
   putToPeers: false
@@ -25,6 +27,19 @@ const DEFAULTS = {
 
 const NOOP = () => {
   // intentionally left blank
+}
+
+const getOtherPeers = (allPeers: PeerSet, peerName: string): PeerSet => {
+  const otherPeers: PeerSet = Object.keys(allPeers).reduce((res, key) => {
+    if (key === peerName) {
+      return res
+    }
+    return {
+      ...res,
+      [key]: allPeers[key]
+    }
+  }, {})
+  return otherPeers
 }
 
 async function updateChangelog(
@@ -50,16 +65,19 @@ async function updateChangelog(
 async function updateFromPeer(
   internal: GunGraphAdapter,
   persist: GunGraphAdapter,
-  name: string,
-  peer: GunGraphAdapter,
+  peerName: string,
+  allPeers: PeerSet,
   soul: string,
-  opts?: FederatedAdapterOpts
+  adapterOpts?: FederatedAdapterOpts
 ): Promise<void> {
+  const peer = allPeers[peerName]
+  const otherPeers = getOtherPeers(allPeers, peerName)
   const {
     maxStaleness = DEFAULTS.maxStaleness,
-    maintainChangelog = DEFAULTS.maintainChangelog
-  } = opts || DEFAULTS
-  const peerSoul = `peers/${name}`
+    maintainChangelog = DEFAULTS.maintainChangelog,
+    putToPeers = DEFAULTS.putToPeers
+  } = adapterOpts || DEFAULTS
+  const peerSoul = `peers/${peerName}`
   const now = new Date().getTime()
   const status = await internal.get(peerSoul, {
     '.': soul
@@ -77,8 +95,14 @@ async function updateFromPeer(
       [soul]: node
     })
 
-    if (diff && maintainChangelog) {
-      updateChangelog(internal, diff)
+    if (diff) {
+      if (maintainChangelog) {
+        updateChangelog(internal, diff)
+      }
+
+      if (putToPeers) {
+        updatePeers(diff, otherPeers)
+      }
     }
   }
 
@@ -102,18 +126,18 @@ function updateFromPeers(
   soul: string,
   opts?: FederatedAdapterOpts
 ): Promise<void> {
-  const entries = Object.entries(allPeers)
-  return entries.length
+  const peerNames = Object.keys(allPeers)
+  return peerNames.length
     ? Promise.all(
-        entries.map(([name, peer]) =>
-          updateFromPeer(internal, persist, name, peer, soul, opts)
+        peerNames.map(name =>
+          updateFromPeer(internal, persist, name, allPeers, soul, opts)
         )
       ).then(NOOP)
     : Promise.resolve()
 }
 
-function updatePeers(data: GunGraphData, allPeers: PeerSet): Promise<void> {
-  const entries = Object.entries(allPeers)
+function updatePeers(data: GunGraphData, otherPeers: PeerSet): Promise<void> {
+  const entries = Object.entries(otherPeers)
   return entries.length
     ? Promise.all(
         entries.map(([name, peer]) =>
@@ -169,10 +193,18 @@ export function getChangesetFeed(
 export async function syncWithPeer(
   internal: GunGraphAdapter,
   persist: GunGraphAdapter,
-  name: string,
-  peer: GunGraphAdapter,
-  from: string
+  peerName: string,
+  allPeers: PeerSet,
+  from: string,
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
 ): Promise<string> {
+  const {
+    maintainChangelog = DEFAULTS.maintainChangelog,
+    putToPeers = DEFAULTS.putToPeers
+  } = adapterOpts || DEFAULTS
+
+  const peer = allPeers[peerName]
+  const otherPeers = getOtherPeers(allPeers, peerName)
   const getNext = getChangesetFeed(peer, from)
   // tslint:disable-next-line: no-let
   let lastKey: string = ''
@@ -182,16 +214,32 @@ export async function syncWithPeer(
   // tslint:disable-next-line: no-conditional-assignment
   while ((entry = await getNext())) {
     const [key, changes] = entry
-    await persist.put(changes)
+    try {
+      const diff = await persist.put(changes)
+
+      if (diff) {
+        if (maintainChangelog) {
+          updateChangelog(internal, diff)
+        }
+
+        if (putToPeers) {
+          updatePeers(diff, otherPeers)
+        }
+      }
+    } catch (e) {
+      // tslint:disable-next-line: no-console
+      console.warn('Error syncing from peer', peerName, e.stack)
+    }
+
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
           '#': PEER_SYNC_SOUL,
           '>': {
-            [name]: new Date().getTime()
+            [peerName]: new Date().getTime()
           }
         },
-        [name]: key
+        [peerName]: key
       }
     })
 
@@ -204,16 +252,25 @@ export async function syncWithPeer(
 export async function syncWithPeers(
   internal: GunGraphAdapter,
   persist: GunGraphAdapter,
-  allPeers: PeerSet
+  allPeers: PeerSet,
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
 ): Promise<void> {
-  const entries = Object.entries(allPeers)
-  const yesterday = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
-  return entries.length
+  const { backSync = DEFAULTS.backSync } = adapterOpts || DEFAULTS
+  const peerNames = Object.keys(allPeers)
+  const yesterday = new Date(Date.now() - backSync).toISOString()
+  return peerNames.length
     ? Promise.all(
-        entries.map(async ([name, peer]) => {
-          const node = await internal.get(PEER_SYNC_SOUL, { '.': name })
-          const key = (node && node[name]) || yesterday
-          return syncWithPeer(internal, persist, name, peer, key)
+        peerNames.map(async peerName => {
+          const node = await internal.get(PEER_SYNC_SOUL, { '.': peerName })
+          const key = (node && node[peerName]) || yesterday
+          return syncWithPeer(
+            internal,
+            persist,
+            peerName,
+            allPeers,
+            key,
+            adapterOpts
+          )
         })
       ).then(NOOP)
     : Promise.resolve()
@@ -263,14 +320,15 @@ export function createFederatedAdapter(
         updateChangelog(internal, diff)
       }
 
-      if (diff && putToPeers) {
+      if (putToPeers) {
         updatePeers(diff, peers)
       }
 
       return diff
     },
 
-    syncWithPeers: () => syncWithPeers(internal, persist, external),
+    syncWithPeers: () =>
+      syncWithPeers(internal, persist, external, adapterOpts),
 
     getChangesetFeed: (from: string) => getChangesetFeed(internal, from)
   }
