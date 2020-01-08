@@ -70,6 +70,10 @@ async function updateFromPeer(
   soul: string,
   adapterOpts?: FederatedAdapterOpts
 ): Promise<void> {
+  if (soul === CHANGELOG_SOUL || soul === PEER_SYNC_SOUL) {
+    return
+  }
+
   const peer = allPeers[peerName]
   const otherPeers = getOtherPeers(allPeers, peerName)
   const {
@@ -91,18 +95,27 @@ async function updateFromPeer(
   const node = await peer.get(soul)
 
   if (node) {
-    const diff = await persist.put({
-      [soul]: node
-    })
+    try {
+      const diff = await persist.put({
+        [soul]: node
+      })
 
-    if (diff) {
-      if (maintainChangelog) {
-        updateChangelog(internal, diff)
-      }
+      if (diff) {
+        if (maintainChangelog) {
+          updateChangelog(internal, diff)
+        }
 
-      if (putToPeers) {
-        updatePeers(diff, otherPeers)
+        if (putToPeers) {
+          updatePeers(diff, otherPeers)
+        }
       }
+    } catch (e) {
+      // tslint:disable-next-line: no-console
+      console.warn('Error updating from peer', {
+        error: e.stack,
+        peerName,
+        soul
+      })
     }
   }
 
