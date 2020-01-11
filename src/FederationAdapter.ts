@@ -1,3 +1,4 @@
+import { diffGunCRDT, mergeGraph } from '@chaingun/crdt'
 import {
   GunGetOpts,
   GunGraphAdapter,
@@ -19,7 +20,7 @@ const CHANGELOG_SOUL = 'changelog'
 const PEER_SYNC_SOUL = `peersync`
 
 const DEFAULTS = {
-  backSync: 1000 * 60 * 60 * 1, // 1 Hour
+  backSync: 1000 * 60 * 60 * 24, // 1 day
   maintainChangelog: true,
   maxStaleness: 1000 * 60 * 60 * 24,
   putToPeers: false
@@ -224,11 +225,16 @@ export async function syncWithPeer(
   // tslint:disable-next-line: no-let
   let entry: ChangeSetEntry | null
 
-  // tslint:disable-next-line: no-conditional-assignment
-  while ((entry = await getNext())) {
-    const [key, changes] = entry
+  // tslint:disable-next-line: no-let
+  let batchCount = 0
+  const batchSize = 1000
+  // tslint:disable-next-line: no-let
+  let batchedChanges: GunGraphData = {}
+
+  async function writeBatch(key: string): Promise<void> {
     try {
-      const diff = await persist.put(changes)
+      console.log('sync batch', peerName, batchCount, key)
+      const diff = await persist.put(batchedChanges)
 
       if (diff) {
         if (maintainChangelog) {
@@ -255,11 +261,35 @@ export async function syncWithPeer(
         [peerName]: key
       }
     })
-
+    batchedChanges = {}
+    batchCount = 0
     lastKey = key
   }
 
-  return lastKey
+  // tslint:disable-next-line: no-let
+  let lastSeenKey: string = lastKey
+
+  // tslint:disable-next-line: no-conditional-assignment
+  while ((entry = await getNext())) {
+    const [key, changes] = entry
+    const diff = diffGunCRDT(changes, batchedChanges)
+    batchedChanges = diff
+      ? mergeGraph(batchedChanges, diff, 'mutable')
+      : batchedChanges
+    batchCount++
+
+    if (batchCount >= batchSize) {
+      await writeBatch(key)
+    }
+
+    lastSeenKey = key
+  }
+
+  if (lastSeenKey && Object.keys(batchedChanges).length) {
+    await writeBatch(lastSeenKey)
+  }
+
+  return lastSeenKey
 }
 
 export async function syncWithPeers(

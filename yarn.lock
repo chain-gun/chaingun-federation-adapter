@@ -298,6 +298,18 @@
     typedoc-default-themes "^0.6.0-0"
     typescript "3.5.x"
 
+"@chaingun/crdt@^0.0.2":
+  version "0.0.2"
+  resolved "https://registry.yarnpkg.com/@chaingun/crdt/-/crdt-0.0.2.tgz#9d62c703e81c95e3e347c078352284707c0ff1bd"
+  integrity sha512-JggscTfwsubnYamCTFI+rgCLKBrlv3NVBeymPdw0fpjVgCsDf9FFJDzYrsEl7lLUXIAZ+GG0pDki0DW2DsOx6Q==
+  dependencies:
+    "@chaingun/types" "^0.0.3"
+
+"@chaingun/types@^0.0.3":
+  version "0.0.3"
+  resolved "https://registry.yarnpkg.com/@chaingun/types/-/types-0.0.3.tgz#2f0968932c827528b8815ce4b2886661f7d94e06"
+  integrity sha512-0rIMrcK0BGiiIzMhlhNxSiqGwyxWhgbGyUdycp6cmqwQrhFd6cxBVUtGkdWsGULrHUye26TLeKfbGXRvP8TXCQ==
+
 "@chaingun/types@^0.0.6":
   version "0.0.6"
   resolved "https://registry.yarnpkg.com/@chaingun/types/-/types-0.0.6.tgz#cc8d45238cf44768843ca7fcb1aaad1e8289bd2b"

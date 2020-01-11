@@ -1,6 +1,6 @@
 {
   "name": "@chaingun/federation-adapter",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "ChainGun Adapter for sourcing from federated peers",
   "main": "build/main/index.js",
   "typings": "build/main/index.d.ts",
@@ -51,6 +51,7 @@
     "node": ">=8.9"
   },
   "dependencies": {
+    "@chaingun/crdt": "^0.0.2",
     "@chaingun/types": "^0.0.6",
     "@types/uuid": "^3.4.6",
     "uuid": "^3.3.3"
