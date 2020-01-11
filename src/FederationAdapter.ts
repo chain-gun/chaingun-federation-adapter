@@ -277,7 +277,8 @@ export async function syncWithPeer(
     await writeBatch(lastSeenKey)
   }
 
-  if (lastSeenKey !== lastKey) {
+  if (lastSeenKey > lastKey) {
+    console.log('lastKey', lastKey)
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
