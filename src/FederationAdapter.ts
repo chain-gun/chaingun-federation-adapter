@@ -178,9 +178,6 @@ export function getChangesetFeed(
   // tslint:disable-next-line: no-let
   let nodePromise: Promise<GunNode | null> | null = null
 
-  // tslint:disable-next-line: no-console
-  console.log('getChangesetFeed', from)
-
   return async function getNext(): Promise<
     readonly [string, GunGraphData] | null
   > {
