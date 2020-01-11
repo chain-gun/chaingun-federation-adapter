@@ -250,20 +250,23 @@ export async function syncWithPeer(
       console.warn('Error syncing from peer', peerName, e.stack)
     }
 
-    await internal.put({
-      [PEER_SYNC_SOUL]: {
-        _: {
-          '#': PEER_SYNC_SOUL,
-          '>': {
-            [peerName]: new Date().getTime()
-          }
-        },
-        [peerName]: key
-      }
-    })
     batchedChanges = {}
     batchCount = 0
-    lastKey = key
+
+    if (key > lastKey) {
+      await internal.put({
+        [PEER_SYNC_SOUL]: {
+          _: {
+            '#': PEER_SYNC_SOUL,
+            '>': {
+              [peerName]: new Date().getTime()
+            }
+          },
+          [peerName]: key
+        }
+      })
+      lastKey = key
+    }
   }
 
   // tslint:disable-next-line: no-let
@@ -289,7 +292,7 @@ export async function syncWithPeer(
     await writeBatch(lastSeenKey)
   }
 
-  return lastSeenKey
+  return lastKey
 }
 
 export async function syncWithPeers(
