@@ -178,6 +178,9 @@ export function getChangesetFeed(
   // tslint:disable-next-line: no-let
   let nodePromise: Promise<GunNode | null> | null = null
 
+  // tslint:disable-next-line: no-console
+  console.log('getChangesetFeed', from)
+
   return async function getNext(): Promise<
     readonly [string, GunGraphData] | null
   > {
@@ -278,7 +281,7 @@ export async function syncWithPeer(
     await writeBatch(lastSeenKey)
   }
 
-  if (lastSeenKey) {
+  if (lastSeenKey > from) {
     console.log('lastKey', from)
     await internal.put({
       [PEER_SYNC_SOUL]: {
@@ -310,6 +313,7 @@ export async function syncWithPeers(
         peerNames.map(async peerName => {
           const node = await internal.get(PEER_SYNC_SOUL, { '.': peerName })
           const key = (node && node[peerName]) || yesterday
+          console.log({ node, key })
           return syncWithPeer(
             internal,
             persist,
