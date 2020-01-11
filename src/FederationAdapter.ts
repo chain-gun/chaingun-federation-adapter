@@ -269,14 +269,16 @@ export async function syncWithPeer(
       await writeBatch(key)
     }
 
-    lastSeenKey = key
+    if (key > lastSeenKey) {
+      lastSeenKey = key
+    }
   }
 
   if (lastSeenKey && Object.keys(batchedChanges).length) {
     await writeBatch(lastSeenKey)
   }
 
-  if (lastSeenKey > from) {
+  if (lastSeenKey) {
     console.log('lastKey', from)
     await internal.put({
       [PEER_SYNC_SOUL]: {
