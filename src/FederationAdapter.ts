@@ -221,7 +221,6 @@ export async function syncWithPeer(
   const otherPeers = getOtherPeers(allPeers, peerName)
   const getNext = getChangesetFeed(peer, from)
   // tslint:disable-next-line: no-let
-  let lastKey: string = ''
   // tslint:disable-next-line: no-let
   let entry: ChangeSetEntry | null
 
@@ -255,7 +254,7 @@ export async function syncWithPeer(
   }
 
   // tslint:disable-next-line: no-let
-  let lastSeenKey: string = lastKey
+  let lastSeenKey: string = from
 
   // tslint:disable-next-line: no-conditional-assignment
   while ((entry = await getNext())) {
@@ -277,8 +276,8 @@ export async function syncWithPeer(
     await writeBatch(lastSeenKey)
   }
 
-  if (lastSeenKey > lastKey) {
-    console.log('lastKey', lastKey)
+  if (lastSeenKey > from) {
+    console.log('lastKey', from)
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
