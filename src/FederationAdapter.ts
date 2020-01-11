@@ -282,7 +282,7 @@ export async function syncWithPeer(
   }
 
   if (lastSeenKey > from) {
-    console.log('lastKey', from)
+    console.log('updated to', peerName, from)
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
@@ -313,7 +313,7 @@ export async function syncWithPeers(
         peerNames.map(async peerName => {
           const node = await internal.get(PEER_SYNC_SOUL, { '.': peerName })
           const key = (node && node[peerName]) || yesterday
-          console.log({ node, key })
+
           return syncWithPeer(
             internal,
             persist,
