@@ -232,6 +232,7 @@ export async function syncWithPeer(
 
   async function writeBatch(key: string): Promise<void> {
     try {
+      // tslint:disable-next-line: no-console
       console.log('sync batch', peerName, batchCount, key)
       const diff = await persist.put(batchedChanges)
 
@@ -279,7 +280,7 @@ export async function syncWithPeer(
   }
 
   if (lastSeenKey > from) {
-    console.log('updated to', peerName, from)
+    // tslint:disable-next-line: no-console
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
@@ -296,6 +297,108 @@ export async function syncWithPeer(
   return lastSeenKey
 }
 
+export function connectToPeer(
+  internal: GunGraphAdapter,
+  persist: GunGraphAdapter,
+  allPeers: PeerSet,
+  peerName: string,
+  from: string,
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
+): () => void {
+  const {
+    maintainChangelog = DEFAULTS.maintainChangelog,
+    putToPeers = DEFAULTS.putToPeers
+  } = adapterOpts || DEFAULTS
+  const peer = allPeers[peerName]
+  const otherPeers = getOtherPeers(allPeers, peerName)
+
+  if (!peer || !peer.onChange) {
+    throw new Error(`Unconnectable peer ${peerName}`)
+  }
+
+  // tslint:disable-next-line: no-let
+  let disconnector: () => void
+  ;(async () => {
+    // Catch up in batches before establishing connection
+    const lastKey = await syncWithPeer(
+      internal,
+      persist,
+      peerName,
+      allPeers,
+      from,
+      adapterOpts
+    )
+
+    disconnector = peer.onChange!(async ([key, changes]) => {
+      try {
+        // tslint:disable-next-line: no-console
+        const diff = await persist.put(changes)
+
+        if (diff) {
+          if (maintainChangelog) {
+            updateChangelog(internal, diff)
+          }
+
+          if (putToPeers) {
+            updatePeers(diff, otherPeers)
+          }
+        }
+      } catch (e) {
+        // tslint:disable-next-line: no-console
+        console.warn('Error syncing from peer', peerName, e.stack)
+      }
+
+      await internal.put({
+        [PEER_SYNC_SOUL]: {
+          _: {
+            '#': PEER_SYNC_SOUL,
+            '>': {
+              [peerName]: new Date().getTime()
+            }
+          },
+          [peerName]: key
+        }
+      })
+    }, lastKey)
+  })()
+
+  return () => disconnector && disconnector()
+}
+
+export function connectToPeers(
+  internal: GunGraphAdapter,
+  persist: GunGraphAdapter,
+  allPeers: PeerSet,
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
+): () => void {
+  const { backSync = DEFAULTS.backSync } = adapterOpts || DEFAULTS
+  const peerNames = Object.keys(allPeers)
+  const yesterday = new Date(Date.now() - backSync).toISOString()
+  const connectable = peerNames.filter(
+    peerName => !!(allPeers[peerName] && allPeers[peerName].onChange)
+  )
+
+  // tslint:disable-next-line: readonly-array
+  const disconnectors: Array<() => void> = []
+
+  connectable.map(async peerName => {
+    const node = await internal.get(PEER_SYNC_SOUL, { '.': peerName })
+    const key = (node && node[peerName]) || yesterday
+    disconnectors.push(
+      connectToPeer(
+        internal,
+        persist,
+        allPeers,
+        peerName,
+        key || yesterday,
+        adapterOpts
+      )
+    )
+  })
+
+  return () => disconnectors.map(dc => dc())
+}
+
 export async function syncWithPeers(
   internal: GunGraphAdapter,
   persist: GunGraphAdapter,
@@ -305,9 +408,13 @@ export async function syncWithPeers(
   const { backSync = DEFAULTS.backSync } = adapterOpts || DEFAULTS
   const peerNames = Object.keys(allPeers)
   const yesterday = new Date(Date.now() - backSync).toISOString()
-  return peerNames.length
+  const unconnectable = peerNames.filter(
+    peerName => !(allPeers[peerName] && allPeers[peerName].onChange)
+  )
+
+  return unconnectable.length
     ? Promise.all(
-        peerNames.map(async peerName => {
+        unconnectable.map(async peerName => {
           const node = await internal.get(PEER_SYNC_SOUL, { '.': peerName })
           const key = (node && node[peerName]) || yesterday
 
@@ -326,6 +433,7 @@ export async function syncWithPeers(
 
 export interface FederatedGunGraphAdapter extends GunGraphAdapter {
   readonly syncWithPeers: () => Promise<void>
+  readonly connectToPeers: () => () => void
   readonly getChangesetFeed: (
     from: string
   ) => () => Promise<ChangeSetEntry | null>
@@ -377,6 +485,9 @@ export function createFederatedAdapter(
 
     syncWithPeers: () =>
       syncWithPeers(internal, persist, external, adapterOpts),
+
+    connectToPeers: () =>
+      connectToPeers(internal, persist, external, adapterOpts),
 
     getChangesetFeed: (from: string) => getChangesetFeed(internal, from)
   }

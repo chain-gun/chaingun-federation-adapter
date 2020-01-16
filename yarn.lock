@@ -310,10 +310,10 @@
   resolved "https://registry.yarnpkg.com/@chaingun/types/-/types-0.0.3.tgz#2f0968932c827528b8815ce4b2886661f7d94e06"
   integrity sha512-0rIMrcK0BGiiIzMhlhNxSiqGwyxWhgbGyUdycp6cmqwQrhFd6cxBVUtGkdWsGULrHUye26TLeKfbGXRvP8TXCQ==
 
-"@chaingun/types@^0.0.6":
-  version "0.0.6"
-  resolved "https://registry.yarnpkg.com/@chaingun/types/-/types-0.0.6.tgz#cc8d45238cf44768843ca7fcb1aaad1e8289bd2b"
-  integrity sha512-VUKhCXHxDb5TMtV+rTFvXrNFRq9yZI1uqCt69UC09kgJfhJQPgtKsCx2kPWABGO8K5bErztmgMmcLPY/6GUp/g==
+"@chaingun/types@^0.0.7":
+  version "0.0.7"
+  resolved "https://registry.yarnpkg.com/@chaingun/types/-/types-0.0.7.tgz#4cb63608aa4e7199f9e46e49803c16cc5fb0ec4e"
+  integrity sha512-Jdo+9HwqItqyotogFeMd+/VZxTUiCEe4hcUX0nGLpUZPnECxqFKr86lzQnTmk7/iBL+3+RAFJ47jPwDn2/c7gA==
 
 "@concordance/react@^2.0.0":
   version "2.0.0"
