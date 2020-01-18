@@ -14,13 +14,15 @@ export interface FederatedAdapterOpts {
   readonly maxStaleness?: number
   readonly maintainChangelog?: boolean
   readonly putToPeers?: boolean
+  readonly batchInterval?: number
 }
 
 const CHANGELOG_SOUL = 'changelog'
 const PEER_SYNC_SOUL = `peersync`
 
 const DEFAULTS = {
-  backSync: 1000 * 60 * 60 * 24, // 1 day
+  backSync: 1000 * 60 * 60 * 24, // 24 hours
+  batchInterval: 500,
   maintainChangelog: true,
   maxStaleness: 1000 * 60 * 60 * 24,
   putToPeers: false
@@ -186,6 +188,7 @@ export function getChangesetFeed(
         '>': `${lastKey}一`
       })
       const node = await nodePromise
+      nodePromise = null
 
       if (node) {
         for (const key in node) {
@@ -197,6 +200,7 @@ export function getChangesetFeed(
       }
     } else if (nodePromise) {
       await nodePromise
+      nodePromise = null
     }
 
     const entry = changes.pop()
@@ -212,11 +216,6 @@ export async function syncWithPeer(
   from: string,
   adapterOpts: FederatedAdapterOpts = DEFAULTS
 ): Promise<string> {
-  const {
-    maintainChangelog = DEFAULTS.maintainChangelog,
-    putToPeers = DEFAULTS.putToPeers
-  } = adapterOpts || DEFAULTS
-
   const peer = allPeers[peerName]
   const otherPeers = getOtherPeers(allPeers, peerName)
   const getNext = getChangesetFeed(peer, from)
@@ -224,35 +223,7 @@ export async function syncWithPeer(
   // tslint:disable-next-line: no-let
   let entry: ChangeSetEntry | null
 
-  // tslint:disable-next-line: no-let
-  let batchCount = 0
-  const batchSize = 1000
-  // tslint:disable-next-line: no-let
-  let batchedChanges: GunGraphData = {}
-
-  async function writeBatch(key: string): Promise<void> {
-    try {
-      // tslint:disable-next-line: no-console
-      console.log('sync batch', peerName, batchCount, key)
-      const diff = await persist.put(batchedChanges)
-
-      if (diff) {
-        if (maintainChangelog) {
-          updateChangelog(internal, diff)
-        }
-
-        if (putToPeers) {
-          updatePeers(diff, otherPeers)
-        }
-      }
-    } catch (e) {
-      // tslint:disable-next-line: no-console
-      console.warn('Error syncing from peer', peerName, e.stack)
-    }
-
-    batchedChanges = {}
-    batchCount = 0
-  }
+  const batch = batchWriter(internal, persist, otherPeers, adapterOpts)
 
   // tslint:disable-next-line: no-let
   let lastSeenKey: string = from
@@ -260,27 +231,25 @@ export async function syncWithPeer(
   // tslint:disable-next-line: no-conditional-assignment
   while ((entry = await getNext())) {
     const [key, changes] = entry
-    const diff = diffGunCRDT(changes, batchedChanges)
-    batchedChanges = diff
-      ? mergeGraph(batchedChanges, diff, 'mutable')
-      : batchedChanges
-    batchCount++
-
-    if (batchCount >= batchSize) {
-      await writeBatch(key)
-    }
 
     if (key > lastSeenKey) {
+      batch.queueDiff(changes)
       lastSeenKey = key
     }
   }
 
-  if (lastSeenKey && Object.keys(batchedChanges).length) {
-    await writeBatch(lastSeenKey)
-  }
-
   if (lastSeenKey > from) {
-    // tslint:disable-next-line: no-console
+    try {
+      // tslint:disable-next-line: no-console
+      console.log('writing batch', peerName, lastSeenKey)
+      await batch.writeBatch()
+      // tslint:disable-next-line: no-console
+      console.log('wrote batch', peerName, lastSeenKey)
+    } catch (e) {
+      // tslint:disable-next-line: no-console
+      console.error('Error syncing with peer', peerName, e.stack)
+    }
+
     await internal.put({
       [PEER_SYNC_SOUL]: {
         _: {
@@ -305,10 +274,6 @@ export function connectToPeer(
   from: string,
   adapterOpts: FederatedAdapterOpts = DEFAULTS
 ): () => void {
-  const {
-    maintainChangelog = DEFAULTS.maintainChangelog,
-    putToPeers = DEFAULTS.putToPeers
-  } = adapterOpts || DEFAULTS
   const peer = allPeers[peerName]
   const otherPeers = getOtherPeers(allPeers, peerName)
 
@@ -316,11 +281,14 @@ export function connectToPeer(
     throw new Error(`Unconnectable peer ${peerName}`)
   }
 
+  const batch = batchWriter(internal, persist, otherPeers, adapterOpts)
+
   // tslint:disable-next-line: no-let
   let disconnector: () => void
   ;(async () => {
     // Catch up in batches before establishing connection
-    const lastKey = await syncWithPeer(
+    // tslint:disable-next-line: no-let
+    let lastKey = await syncWithPeer(
       internal,
       persist,
       peerName,
@@ -329,25 +297,19 @@ export function connectToPeer(
       adapterOpts
     )
 
-    disconnector = peer.onChange!(async ([key, changes]) => {
-      try {
-        // tslint:disable-next-line: no-console
-        const diff = await persist.put(changes)
+    const { batchInterval = DEFAULTS.batchInterval } = adapterOpts
 
-        if (diff) {
-          if (maintainChangelog) {
-            updateChangelog(internal, diff)
-          }
+    // tslint:disable-next-line: no-let
+    let syncedKey = lastKey
 
-          if (putToPeers) {
-            updatePeers(diff, otherPeers)
-          }
-        }
-      } catch (e) {
-        // tslint:disable-next-line: no-console
-        console.warn('Error syncing from peer', peerName, e.stack)
+    async function writeBatch(): Promise<void> {
+      if (syncedKey === lastKey) {
+        return
       }
 
+      syncedKey = lastKey
+
+      await batch.writeBatch()
       await internal.put({
         [PEER_SYNC_SOUL]: {
           _: {
@@ -356,10 +318,27 @@ export function connectToPeer(
               [peerName]: new Date().getTime()
             }
           },
-          [peerName]: key
+          [peerName]: lastKey
         }
       })
+    }
+
+    disconnector = peer.onChange!(([key, changes]) => {
+      try {
+        batch.queueDiff(changes)
+        lastKey = key
+        if (!batchInterval) {
+          writeBatch()
+        }
+      } catch (e) {
+        // tslint:disable-next-line: no-console
+        console.warn('Error syncing from peer', peerName, e.stack)
+      }
     }, lastKey)
+
+    if (batchInterval) {
+      setInterval(writeBatch, batchInterval)
+    }
   })()
 
   return () => disconnector && disconnector()
@@ -490,6 +469,57 @@ export function createFederatedAdapter(
       connectToPeers(internal, persist, external, adapterOpts),
 
     getChangesetFeed: (from: string) => getChangesetFeed(internal, from)
+  }
+}
+
+export function batchWriter(
+  internal: GunGraphAdapter,
+  persist: GunGraphAdapter,
+  peers: PeerSet,
+  adapterOpts: FederatedAdapterOpts = DEFAULTS
+): {
+  readonly queueDiff: (changes: GunGraphData) => GunGraphData | undefined
+  readonly writeBatch: () => Promise<GunGraphData | null>
+} {
+  const {
+    maintainChangelog = DEFAULTS.maintainChangelog,
+    putToPeers = DEFAULTS.putToPeers
+  } = adapterOpts || DEFAULTS
+
+  // tslint:disable-next-line: no-let
+  let batch: GunGraphData = {}
+
+  function queueDiff(changes: GunGraphData): GunGraphData | undefined {
+    const diff = diffGunCRDT(changes, batch)
+    batch = diff ? mergeGraph(batch, diff, 'mutable') : batch
+    return diff
+  }
+
+  async function writeBatch(): Promise<GunGraphData | null> {
+    if (!Object.keys(batch).length) {
+      return null
+    }
+    const toWrite = batch
+    batch = {}
+
+    const diff = await persist.put(toWrite)
+
+    if (diff) {
+      if (maintainChangelog) {
+        updateChangelog(internal, diff)
+      }
+
+      if (putToPeers) {
+        updatePeers(diff, peers)
+      }
+    }
+
+    return diff
+  }
+
+  return {
+    queueDiff,
+    writeBatch
   }
 }
 
